@@ -1,6 +1,6 @@
 ---
 title: "Heart Attack Analysis"
-author: "Francesca M. Riondato and Deborah Maffezzoni"
+author: "Francesca M. Riondato"
 date: "2023-02-09"
 output: html_document
 editor_options: 
