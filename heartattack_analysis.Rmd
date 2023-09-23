@@ -1,0 +1,1160 @@
+---
+title: "Heart Attack Analysis"
+author: "Francesca M. Riondato and Deborah Maffezzoni"
+date: "2023-02-09"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# load packages
+library(magrittr)
+library(dplyr)
+library(DataExplorer)
+library(psych)
+library(corrplot)
+library(RColorBrewer)
+library(ggplot2)
+library(factoextra)
+library(FactoMineR)
+library(ggfortify)
+library(cluster)
+library(ClustOfVar)
+library(rpart)
+library(rpart.plot)
+library(e1071)
+library(stats)
+library(huxtable)
+library(arules)
+library(arulesViz)
+library(class)
+```
+
+## 1. Dataset Information
+
+We decide to propose a **Heart Attack** Analysis and Prediction. The
+dataset used for the project has been taken from *kaggle.com* at the
+following link:
+<https://www.kaggle.com/datasets/rashikrahmanpritom/heart-attack-analysis-prediction-dataset?resource=download>.
+
+```{r}
+#load dataset
+data <- read.table(file = "heart.csv", sep = ",", header = TRUE)
+```
+
+The Heart Attack *dataset* is composed of **303** instances and **14**
+attributes.
+
+```{r}
+# column names of the dataset
+colnames(data)
+```
+
+Let's explain the **characteristic** of each variable:
+
+-   ***age*** : Age of the person (between 29 and 77)
+
+-   ***sex*** : Sex of the patient
+
+    -   *value 0 :* female
+    -   *value 1 :* male
+
+-   ***cp*** : Chest Pain Type
+
+    -   *value 1 :* typical angina
+    -   *value 2 :* atypical angina
+    -   *value 3 :* not anginal pain
+    -   *value 4 :* asymptomatic
+
+-   ***trtbps*** : Resting Blood Pressure in mmHg (between 94 and 200)
+
+-   ***chol*** : Cholesterol in mg/dl fetched via BMI sensor (between
+    126 and 564)
+
+-   ***fbs*** : Fasting Blood Sugar \> 120 mg/dl
+
+    -   *value 0 :* false
+    -   *value 1 :* true
+
+-   ***restecg*** : Resting Electrocardiogram Results
+
+    -   *value 0 :* normal
+    -   *value 1 :* having ST-T wave abnormality (T wave inversions
+        and/or ST elevation or depression of \> 0.05 mV)
+    -   *value 2 :* showing probable or definite left ventricular
+        hypertrophy
+
+-   ***thalachh*** : Maximum Heart Rate achieved (between 71 and 202)
+
+-   ***exng*** : Exercise Induced Angina
+
+    -   *value 0 :* no
+    -   *value 1 :* yes
+
+-   ***oldpeak*** : Stress Test Depression (between 0 and 6.2)
+
+-   ***slp*** : Slope for Peak Exercise
+
+    -   *value 0 :* downsloping
+    -   *value 1 :* flat
+    -   *value 2 :* upsloping
+
+-   ***caa*** : Number of Major Vessels (0 - 3)
+
+-   ***thall*** : Blood Disorder called Thalassemia
+
+    -   *value 0 :* NULL
+    -   *value 1 :* fixed defect (no blood flow)
+    -   *value 2 :* normal
+    -   *value 3 :* reversable defect
+
+-   ***output*** : Heart Disease Prediction
+
+    -   *value 0 :* less chance of heart attack
+    -   *value 1 :* more chance of heart attack
+
+### *1.1 Variable Classification*
+
+```{r}
+# list types for each attribute
+sapply(data, class)
+```
+
+We can observe that the dataset consists of **100%** *numerical*
+variables.
+
+### *1.2 Data Cleaning*
+
+```{r}
+# inspect dataset
+glimpse(data)
+```
+
+Inspecting the Heart Attack dataset, we can notice that *sex*, *cp*,
+*fbs*, *restecq*, *exnq*, *slp*, *caa*, *thall* and *output* are
+***nominal*** attributes, which domain is a finite set. In order to
+better understand the data, we need to transform these features into
+*categorical* variables:
+
+```{r}
+# numerical variables
+numeric_var <- data %>% 
+  select("age","trtbps","chol","thalachh","oldpeak")
+
+# categorical variables 
+categorical_var <- data %>%
+  select("sex","cp","fbs","restecg","exng","slp","caa",
+         "thall","output")%>%
+  mutate_if(is.numeric, as.factor)
+
+# combine the categorical and numerical values
+data1 = cbind(categorical_var,numeric_var)
+
+# inspect dataset
+glimpse(data1)
+```
+
+## 2. Exploratory Data Analysis
+
+In order to better visualize the data, we decide to *transform* the
+content of some categorical variables into the corresponding *meaning :*
+
+```{r}
+# Transformation
+data2 <- data1 %>% 
+  mutate(sex = if_else(sex == 1, "MALE", "FEMALE"),
+         fbs = if_else(fbs == 1, ">120", "<=120"),
+         exng = if_else(exng == 1, "YES" ,"NO"),
+         cp = if_else(cp == 1, "ATYPICAL ANGINA",
+                      if_else(cp == 2, "NON-ANGINAL PAIN", "ASYMPTOMATIC")),
+         restecg = if_else(restecg == 0, "NORMAL",
+                           if_else(restecg == 1, "ABNORMALITY", "PROBABLE OR DEFINITE")),
+         slp = as.factor(slp),
+         caa = as.factor(caa),
+         thall = as.factor(thall),
+         output = if_else(output == 1, "YES", "NO")
+  ) %>% 
+  mutate_if(is.character, as.factor) %>% 
+  dplyr::select(sex, cp, fbs, restecg, exng, slp, caa, thall, output, everything())
+
+# inspect dataset
+glimpse(data2)
+
+head(data2, 10)
+```
+
+### *2.1. Overview of dataset*
+
+Let's analyze the missing values, the discrete columns and continuous
+ones of the *manipulated* dataset:
+
+```{r}
+# Overview of dataset
+plot_intro(data2, title = "Dataset Information")  
+```
+
+By inspecting the BarPlot, we can infer that the dataset does *not*
+present any *missing* values and columns. The **64%** of the dataset is
+composed of *Discrete* Columns, while the remaining **36%** indicates
+the *Continuous* ones.
+
+```{r}
+# Table of Manipulated dataset
+introduce(data2)
+```
+
+Like the original dataset, the manipulated one is composed of 303
+instances and 14 attributes. Instead of the previous one, it contains
+**9** *Discrete* and **5** *Continuous* Columns.
+
+```{r}
+# Table Summary Statistics
+describeBy(data2)
+```
+
+```{r}
+# Outliers Analysis
+boxplot(data2[,10:14], col = c("deeppink","yellow","brown2", "springgreen2", "royalblue4"),
+        xlab = "Continuous Variables", main = "Outlier Analysis") 
+```
+
+### *2.2. Correlation Analysis*
+
+The correlation coefficient $\rho$ measures a *linear* relationship
+between two continuous variables without taking into account other
+features. It can assume value between $-1$ and $+1$, in particular:
+
+-   $\rho \sim -1$ reveals a *strong* ***negative*** dependence
+
+-   $\rho \sim 0$ represents a *strong* ***independence*** between
+    variables
+
+-   $\rho \sim 1$ indicates a *strong* ***positive*** correlation.
+
+```{r}
+# Plot Correlations
+corr_tab <- cor(data)
+corrplot(corr_tab, method = 'number', col = brewer.pal(n=8, name = "RdBu"), tl.col="black", tl.srt=45, tl.cex = 0.5, cl.cex = 0.5, number.cex = 0.6)
+```
+
+According to the resulting color intensities, we can observe that there
+is a ***minimal*** *dependence* between variables because the
+correlation coefficients are close to *zero*. The most relevant features
+are:
+
+-   ***age*** is posetively correlated with *trtbps*, *chol*, *oldpeak*,
+    *caa* and negatively correlated with *thalachh* ;
+
+-   ***cp*** is posetively correlated with *thalachh* and negatively
+    correlated with *exng* ;
+
+-   ***chol*** is negatively correlated with *sex*, *restecg* ;
+
+-   ***thalachh*** is posetively correlated with *cp*, *slp* and
+    negatively correlated with *exng*, *oldpeak* ;
+
+-   ***exng*** is posetively correlated with *oldpeak* and negatively
+    correlated with *slp* ;
+
+-   ***oldpeak*** is negatively correlated with *slp* ;
+
+-   ***output*** is posetively correlated with *cp*, *thalachh*, *slp*
+    and negatively correlated with *exng*, *oldpeak*, *caa*, *thall* .
+
+```{r}
+# Age vs Cholesterol
+age_chol <- ggplot(data2,aes(x = age, y = chol, col = output)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Age", y = "Cholesterol Level") +
+  ggtitle("Age vs Cholesterol") +
+  facet_grid(~sex) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center 
+age_chol
+```
+
+Inspecting the results we can confirm the ***positive*** correlation
+between *Age* and *Cholesterol* level. Regarding the women, we can infer
+that an *increase* of cholesterol level affects the chance of having an
+*Heart Disease*, otherwise there is a less probability to incur in a
+Cardiac Attack. For Men, instead, an *increase* of cholesterol level
+affects slightly more the chance of *not* having Heart Diseases. In both
+the cases, we can notice that the majority of the population has a
+Cholesterol level between **200** and **300** mg/dL.
+
+```{r}
+# Age vs Max Heart Rate
+age_thalachh <- ggplot(data2,aes(x = age, y = thalachh, col = output)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(x = "Age", y = "Max Heart Rate") +
+  ggtitle("Age vs Max Heart Rate") +
+  facet_grid(~sex) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center 
+age_thalachh
+```
+
+Inspecting the results we can confirm the ***negative*** correlation
+between *Age* and *Maximum Heart Rate* : the older a patient is, the
+lower Maximum Heart Rate achieves. In both the cases, we can infer that
+an *increase* of thalachh affects slightly more the chance of *not*
+having Heart Diseases. We can also notice that the majority of the
+population has an Heart Rate range between **125** and **175**.
+
+### *2.3. Data Visualization*
+
+```{r}
+# count frequency
+df_output <- data2 %>%
+  group_by(output) %>%
+  # create a new column to count the freq
+  summarise(count = n()) %>% 
+  # percentage of freq
+  mutate(freq = count/sum(count)*100)
+```
+
+```{r}
+# Bar plot for output (Heart disease) 
+ggplot(data2, aes(x = output, fill = output)) + 
+  geom_bar() +
+  geom_text(stat = 'count', aes(label = after_stat(count)), vjust = -0.30) +
+  labs(x = "Heart Attack", y = "Number of observations") + 
+  ggtitle("Analysis of Presence and Absence of Heart Attack") +
+  scale_fill_discrete(name = "Heart Attack", labels = c("Absence", "Presence")) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+We can observe that **165** patients have *more* chance to incur an
+Heart Attack (about *54.5%*), while the remaining **138** people have
+*less* probability to face a Cardiac Disease (*45.5%*).
+
+```{r}
+# Distribution of Male and Female population across Age parameter
+data2 %>%
+  ggplot(aes(x = age, fill = sex)) +
+  geom_histogram() +
+  labs(x = 'Age', y = 'Number of observations') + 
+  ggtitle("Distribution of Male and Female vs Age") +
+  guides(fill = guide_legend(title = "Gender")) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center 
+```
+
+```{r}
+# Comparison of Blood Pressure across Chest Pain Type 
+data2 %>%
+  ggplot(aes(x = sex, y = trtbps))+
+  geom_boxplot(fill = "bisque")+
+  labs(x = 'Sex', y = 'Blood Pressure') + 
+  ggtitle("Comparison of Blood Pressure across Chest Pain Type") +
+  facet_grid(~cp) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Comparison of Cholestoral across Chest Pain Type 
+data2 %>%
+  ggplot(aes(x = sex, y = chol)) +
+  geom_boxplot(fill = "lightpink3")+
+  labs(x = 'Sex', y = 'Cholestoral') +
+  facet_grid(~cp) +
+  ggtitle("Comparison of Cholestoral across Chest Pain Type") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Representation of Cholestoral level 
+data2 %>%
+  ggplot(aes(x = age, y = chol, color = sex, size = chol)) +
+  geom_point(alpha=0.7) + 
+  labs(x = 'Age', y = 'Cholestoral') + 
+  ggtitle("Cholesteral Level") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Representation of Fasting Blood Sugar level 
+data2 %>%
+  ggplot(aes(x = age, y = chol, color = sex, size = fbs)) +
+  geom_point(alpha=0.7) + 
+  labs(x = 'Age', y = 'Fasting Blood Sugar') + 
+  ggtitle("Fasting Blood Sugar Analysis") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Association between population's Age and Heart Disease
+ggplot(data2, aes(x = age, group = output, 
+                  y = c(..count..[..group.. == 1]/sum(..count..[..group.. == 1]),
+                        ..count..[..group.. == 2]/sum(..count..[..group.. == 2])) * 100)) + 
+  geom_histogram(binwidth = 4, colour = "black", fill = "lightblue") + 
+  facet_grid(output ~ .) +   #split a graph according to panels defined by output
+  labs(title = "Patients Age vs Heart Disease", x = "Age", y = "Percent of Total") + 
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+We can observe that patients between *54* and *58* years old are the
+ones with the *less* chance of having a Cardiac Disease, while people
+between ***50*** and ***54*** years old have the *highest* probability
+of incurring an **Heart** Attack.
+
+```{r}
+# Association between population's Age and Heart Disease (DENSITY)
+ggplot(data2, aes(x = age, fill = output)) + 
+  geom_density(alpha = .3) + 
+  labs(title = "Patients Age vs Heart Disease", x = "Age", y = "Density") +
+  guides(fill = guide_legend(title = "Heart Disease")) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Associations between Fasting Blood Sugar and Heart Disease (DENSITY)
+ggplot(data2, aes(x = age, fill = output)) + 
+  geom_density(alpha = .3) + 
+  facet_grid(fbs ~ .) + 
+  labs(title = "Fasting Blood Sugar vs Heart Disease", x = "Age", y = "Density") +
+  guides(fill = guide_legend(title = "Heart Disease")) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+### *2.4. Output Distribution Analysis*
+
+Let's analyze the association between the main *categorical* features
+and the prediction of having an Heart Attack:
+
+```{r}
+# Association between Sex and Heart Attack
+ggplot(data2, aes_string(x = data2$sex, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Sex vs Heart Attack", x = 'Sex', y = 'Number of observations') +
+  scale_fill_discrete(name = "Heart Disease") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+
+counts <- table(data2$sex, data2$output)
+counts / rowSums(counts)
+```
+
+We can observe that *25%* of the ***female*** patients has a *lower*
+probability of incurring in a Cardiac Disease, while the remaining *75%*
+has an *higher* chance of Heart Attack. Regarding the ***male***
+patients, about the *55%* has a *lower* probability of incurring in a
+Cardiac Disease, while the remaining *45%* has an *higher* chance of
+Heart Attack. According to the dataset, we can conclude that **women**
+are more prone to have *Heart Diseases*.
+
+```{r}
+# Association between Chest Pain Type and Heart Attack
+ggplot(data2, aes_string(x = data2$cp, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Chest Pain Type vs Heart Attack", x = 'Chest Pain Type', y = 'Number of observations') +
+  scale_fill_discrete(name = "Heart Disease") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Association between Fasting Blood Sugar and Heart Attack
+ggplot(data2, aes_string(x = data2$fbs, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Fasting Blood Sugar vs Heart Attack", x = 'Fasting Blood Sugar', y = 'Number of observations') +
+  scale_fill_discrete(name = "Heart Disease") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Association between Resting Electrocardiogram Results and Heart Attack
+ggplot(data2, aes_string(x = data2$restecg, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Resting Electrocardiogram Results vs Heart Attack", x = 'Resting Electrocardiogram Results', y = 'Number of observations') +
+  scale_fill_discrete(name = "Heart Disease") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Association between Exercise Induced Angina and Heart Attack
+ggplot(data2, aes_string(x = data2$exng, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Exercise Induced Angina vs Heart Attack", x = 'Exercise Induced Angina', y = 'Number of observations') +
+  scale_fill_discrete(name = "Heart Disease") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+Let's execute the same procedure considering the *numerical* variables:
+
+```{r}
+# Associations between Resting Blood Pressure and Heart Disease (DENSITY)
+ggplot(data2, aes(x = trtbps, fill = output)) + 
+  geom_density(alpha = .3) + 
+  facet_grid(sex ~ .) + 
+  labs(title = "Resting Blood Pressure vs Heart Disease", x = "Resting Blood Pressure", y = "Density") +
+  guides(fill = guide_legend(title = "Heart Disease")) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+Regarding Resting Blood Pressure, we can see that for women the *lower*
+the density the *higher* the probability of having an Heart Attack. For
+males, on the other hand, there is no substantial difference between the
+probability distribution of having or not the chance of incurring in an
+Heart Disease.
+
+```{r}
+# Associations between Maximum Heart Rate and Heart Disease (DENSITY)
+ggplot(data2, aes(x = thalachh, fill = output)) + 
+  geom_density(alpha = .3) + 
+  facet_grid(sex ~ .) + 
+  labs(title = "Maximum Heart Rate vs Heart Disease", x = "Maximum Heart Rate", y = "Density") +
+  guides(fill = guide_legend(title = "Heart Disease")) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+Inspecting the Maximum Heart Rate, in both the cases we can observe that
+the *higher* Heart Rate the *higher* the probability of having a Cardiac
+Disease.
+
+```{r}
+# Associations between Stress Test Depression and Heart Disease (DENSITY)
+ggplot(data2, aes(x = oldpeak, fill = output)) + 
+  geom_density(alpha = .3) + 
+  facet_grid(sex ~ .) + 
+  labs(title = "Stress Test Depression vs Heart Disease", x = "Stress Test Depression", y = "Density") +
+  guides(fill = guide_legend(title = "Heart Disease")) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+Analyzing the Stress Test Depression, we can notice that for female and
+male the *lower* number of Stress Test the *higher* probability of
+incurring in an Heart Attack.
+
+## 3. Multidimensional Reduction
+
+Since graphical techniques might *not* be the most *appropriate* tools
+when considering many attributes, it is possible to ***project*** the
+higher-dimensional dataset into a smaller subspace, preserving as much
+as possible the ***structure*** of the original dataset in the
+lower-dimensional representation. [Multidimensional
+Reduction]{.underline} techniques are a set of processes for *reducing*
+the number of random variables by obtaining a set of principal
+variables.
+
+### *3.1. PCA*
+
+[Principal Component Analysis]{.underline} (***PCA***) is a statistical
+method to find a ***projection*** to a linear subspace that preserves as
+much as possible of the original variance in the data. The basic idea of
+this procedure is taking a large data set with many variables per
+observation and *reducing* them to a smaller set of summary indices. The
+principal components themselves are a small set of *new*, *uncorrelated*
+features that are ***linear*** combinations of the original variables.
+The first component is constructed to exhibit the most variance of the
+dataset, the second component explains the second most variance, and so
+on.
+
+```{r}
+# calculate principal components
+d2.pca <- prcomp(data2[,10:14], scale = TRUE)
+
+# reverse the signs (eigenvectors in R point in the negative direction)
+d2.pca$rotation <- -1*d2.pca$rotation
+
+# display principal components
+d2.pca$rotation
+
+summary(d2.pca)
+```
+
+We can observe that the first principal component *(PC1)* has high
+values for [*Age*]{.underline} and [*Olpdeak*]{.underline} which
+indicates that this principal component describes the most variation in
+these variables. We can also notice that the second principal component
+*(PC2)* has a positive value only for [*Oldpeak*]{.underline}, which
+indicates that this principle component places most of its emphasis on
+this feature. The third principal component *(PC3)* describes the most
+variation on the [*Cholesteral*]{.underline} variable, the fourth
+principal component *(PC4)* emphasis most of the variation on the
+[*Age*]{.underline} feature, while fifth principal component *(PC5)*
+exhibits most of the variation on the [*Resting Blood
+Pressure*]{.underline} item. We can conclude that PC1 and PC2 explain
+the majority of the variance!
+
+First, we create a *biplot* that ***projects*** each of the observations
+in the dataset onto a scatterplot that uses the first and second
+principal components as the axes. Then, we can also build a *screeplot*
+in order to display the ***total*** ***variance*** explained by each
+principal component :
+
+```{r}
+# biplot
+fviz_pca(d2.pca)
+
+# calculate total variance explained by each principal component
+d2.pca$sdev^2 / sum(d2.pca$sdev^2)
+fviz_screeplot(d2.pca, addlabels = TRUE, barcolor = "coral", hjust = -0.3,
+               barfill = "coral", main = "Total Variance explained by each PC") +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+From the biplot we can see that each of the 5 variables are represented
+in a *two-dimensional* space, where PC1 and PC2 are the *axes* of the
+coordinate system. The features that are *close* to each other on the
+plot have *similar* data patterns in regards to the variables in the
+original dataset.
+
+Inspecting the screeplot we can infer the following results: the first
+principal component (PC1) explains ***36.1%*** of the total variance in
+the dataset; the second principal component (PC2) exhibits ***21.6%***
+of the total variance in the dataset; the third principal component
+(PC3) describes ***17.7%*** of the total variance in the dataset; the
+fourth principal component (PC4) explains ***15.2%*** of the total
+variance in the dataset, while the fifth principal component (PC5)
+exhibits ***9.5%*** of the total variance in the dataset.
+
+Thus, we confirmed that ***PC1*** and ***PC2*** explain the
+***majority*** of the total variance in the dataset.
+
+```{r}
+# Association between PCA and Heart Attack
+autoplot(d2.pca, data = data2, colour = 'output', main = "PCA colorized by Heart Disease", 
+         loadings = TRUE, loadings.colour = "green",
+         loadings.label = TRUE, loadings.label.size = 3, loadings.label.colour = "orchid", loadings.label.vjust = -0.5) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+
+# Association between PCA and Sex
+autoplot(d2.pca, data = data2, colour = 'sex', main = "PCA colorized by Sex", 
+         loadings = TRUE, loadings.colour = "orchid",
+         loadings.label = TRUE, loadings.label.size = 3, loadings.label.colour = "coral1", loadings.label.vjust = -0.5) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+
+# Association between PCA and Blood Disorder
+autoplot(d2.pca, data = data2, colour = 'thall', main = "PCA colorized by Blood Disorder", 
+         loadings = TRUE, loadings.colour = "orchid",
+         loadings.label = TRUE, loadings.label.size = 3, loadings.label.colour = "coral1", loadings.label.vjust = -0.5) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+
+# Association between PCA and Chest Pain Type
+autoplot(d2.pca, data = data2, colour = 'cp', main = "PCA colorized by Chest Pain Type", 
+         loadings = TRUE, loadings.colour = "orchid",
+         loadings.label = TRUE, loadings.label.size = 3, loadings.label.colour = "plum", loadings.label.vjust = -0.5) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+## 4. Patterns Identification
+
+Several approaches can be used to summarize, describe and explore the
+data set in order to highlight the *relationships* and *similarities*
+between individual data points. Let's analyze the main techniques:
+
+### *4.1. Hierarchical Clustering*
+
+[Hierarchical clustering]{.underline} is a method for visualizing and
+interpreting the *relationship* between individual data points. The
+algorithm builds clusters by measuring the *dissimilarities* between
+data. This method does ***not*** require the number of clusters to be
+selected before running the algorithm and it works better when the data
+has a *nested* structure.
+
+We decide to implement the Hierarchical clustering by using the
+***complete*** *linkage*, that records the *largest* dissimilarity
+between any two points between the two clusters being compared.
+
+```{r}
+# ONLY numerical features
+data_std <- scale(data1[, -c(1:9)])
+d <- dist(data_std)
+
+# executing with complete linkage
+data_cl <- hclust(d, method = "complete")
+```
+
+By using the *fviz_nbclust()* function, we can determine and visualize
+the *optimal* number of clusters:
+
+```{r}
+# optimal number of clusters
+fviz_nbclust(data_std, FUNcluster = kmeans, method = "silhouette")
+```
+
+Inspecting the graph we can conclude that the *optimal* number of
+clusters is ***2***, so let's plot the corresponding *dendrogram* :
+
+```{r}
+# plot the dendrogram
+plot(data_cl, cex = 0.3)
+rect.hclust(data_cl, k = 2, border = 2:4)
+
+# getting cluster assignments based on optimal number of clusters
+cluster <- cutree(data_cl, 2)           # cutree() returns the partitioning of dataset 
+# test the complete linkage
+table(cluster, data2$output)
+```
+
+In the first cluster (C1) we can notice that ***162*** patients are
+*more* likely of having an Heart Disease, while the remaining ***136***
+have *less* chance to face in a Cardiac Attack. Regarding the second
+cluster (C2) we can observe that ***3*** patients have *higher*
+probability of facing an Heart Disease, while the remaining ***2*** have
+*less* chance to incur a Cardiac Attack.
+
+In order to better understand the data, we can implement an *ascendant*
+hierarchical clustering of a set of variables, including both the
+quantitative and the qualitative features:
+
+```{r}
+# ascendant hierarchical clustering
+xquant <- data2[10:14]                  # Numeric variables
+xqual <- data2[1:9]                     # Categorical variables
+
+tree <- hclustvar(xquant, xqual)
+plot(tree, cex = 0.6)
+rect.hclust(tree, k = 2, border = 2:4)
+```
+
+### *4.2. Prototype Clustering*
+
+[Prototype-Based Clustering]{.underline} (or [*k-means*]{.underline}
+algorithm) condenses all observations into a small, fixed number of
+*prototypical* records, each of them standing for a *subgroup* of the
+dataset. For the k-means algorithm, it is necessary to select the
+***number*** of clusters in advance. This technique is more *efficient*
+than the previous one, and the results are understandable even for much
+larger datasets.
+
+Let's start by identifying two initial *clusters* that allow us to
+visualize well-separated groups according to the mean values of the
+numeric attributes of the data set.
+
+Because the k-means algorithm initially selects the cluster centers by
+randomly selecting points, *different* iterations of the algorithm can
+result in *different* clusters being created. If the algorithm is truly
+grouping together similar observations, then cluster assignments will be
+somewhat ***robust*** between different iterations of the algorithm.
+Since we want that the same patients would be grouped together even when
+the algorithm is initialized at different random points, we use the
+*set.seed()* function:
+
+```{r}
+set.seed(240)
+# number of optimal clusters
+k = 2
+
+# running the 2-means algorithm
+data.km2 <- kmeans(data_std, centers = k, nstart = 1)
+fviz_cluster(data.km2, data = data_std)
+aggregate(data2[,-c(1:9)], by = list(cluster = data.km2$cluster), FUN = mean)
+
+# how many patients are in each group?
+data.km2$size
+
+# creating the plots of the optimal clustering algorithm
+ggplot(data2, aes_string(x = data.km2$cluster, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Optimal Clustering Visualization", x = "Cluster", y = "Number of observations") + 
+  scale_fill_discrete(name = "Heart Disease", labels = c("Absence", "Presence")) + 
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+How many patients are in each group? The first cluster (C1) contains
+***174*** people, while the second group (C2) is composed of ***129***
+patients.
+
+Now let's compute the *probability* of having a Heart Attack according
+to the cluster to which the individual belongs:
+
+```{r}
+countskm <- table(data.km2$cluster, data2$output)
+countskm / rowSums(countskm)
+```
+
+Inspecting the results, we can observe that in the first cluster (C1)
+the ***71.8%*** of the patients has an *higher* probability of facing an
+Heart Disease, while the remaining ***28.2%*** has *less* chance to
+incur a Cardiac Attack. Regarding the second cluster (C2) the ***31%***
+of the patients is *more* likely of having an Heart Disease, while the
+remaining ***69%*** has *less* chance to face in a Cardiac Attack.
+
+In order to have a more precise analysis, let's consider *meaningful*
+attributes:
+
+```{r}
+# Cluster grouping by Sex
+ggplot(data2, aes_string(x = data.km2$cluster, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Cluster grouping by Sex", x = "Cluster", y = "Number of observations") + 
+  scale_fill_discrete(name = "Heart Disease", labels = c("Absence", "Presence")) +
+  facet_grid(sex ~ .) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Cluster grouping by Chest Pain
+ggplot(data2, aes_string(x = data.km2$cluster, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Cluster grouping by Chest Pain", x = "Cluster", y = "Number of observations") + 
+  scale_fill_discrete(name = "Heart Disease", labels = c("Absence", "Presence")) + 
+  facet_grid(cp ~ .) + 
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Cluster grouping by Fasting Blood Sugar
+ggplot(data2, aes_string(x = data.km2$cluster, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Cluster grouping by Fasting Blood Sugar", x = "Cluster", y = "Number of observations") + 
+  scale_fill_discrete(name = "Heart Disease", labels = c("Absence", "Presence")) + 
+  facet_grid(fbs ~ .) + 
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Cluster grouping by Blood Disorder
+ggplot(data2, aes_string(x = data.km2$cluster, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Cluster grouping by Blood Disorder", x = "Cluster", y = "Number of observations") + 
+  scale_fill_discrete(name = "Heart Disease", labels = c("Absence", "Presence")) + 
+  facet_grid(thall ~ .) + 
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+```{r}
+# Cluster grouping by Number of Major Vessels
+ggplot(data2, aes_string(x = data.km2$cluster, fill = data2$output)) + 
+  geom_bar(position = position_dodge()) + 
+  labs(title = "Cluster grouping by Number of Major Vessels", x = "Cluster", y = "Number of observations") + 
+  scale_fill_discrete(name = "Heart Disease", labels = c("Absence", "Presence")) + 
+  facet_grid(caa ~ .) + 
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+### *4.3. Association Rules*
+
+[Association Rule Mining]{.underline} is a common technique used to find
+*associations* between variables. It controls the number of rules to be
+generated by using three parameters: *Support* (how frequently it
+appears in the dataset), *Confidence* (how often rule has been found to
+be true) and *Lift* (major parameter based in the previous ones).
+
+```{r}
+rules <- apriori(data2, parameter = list(supp = 0.005, conf = 0.8, maxlen = 4), appearance = list(rhs = c('output=YES', 'output=NO')))
+
+summary(rules)
+```
+
+The Apriori algorithm generated ***2362*** rules with the given
+constraints. Let's inspect the first *ten* rows rules sorted by *lift* :
+
+```{r}
+inspect(sort(rules, by = 'lift')[1:10])
+plot(rules, method = "scatterplot", 
+     measure = "confidence", shading = "lift")
+plot(rules, method = "graph")
+```
+
+```{r}
+rules_info <-
+  data.frame(
+    LHS = labels(lhs(rules)), 
+    RHS = labels(rhs(rules)),          
+    quality(rules)
+  )
+
+head(rules_info[rules_info$RHS == '{output=YES}', ])
+
+plot(rules)
+```
+
+Inspecting the graph we can notice that the *lower* the support, the
+*higher* the confidence and the lift, meaning that when the rule less
+appear, it has often been found to be true. In the other hand, the
+*higher* the support, the *lower* the confidence and the lift, revealing
+that when the association most appear, it has not been often found to be
+true. We can conclude that support is ***inversely*** *proportional* to
+both the confidence and the lift.
+
+### *4.4. Decision Tree*
+
+[Decision Tree]{.underline} is a method for visualizing and interpreting
+the *relationship* between individual data points in form of a tree.
+Each *node* of the graph identifies an event or choice, while each
+*edge* of the graph represents the decision rules or conditions.
+
+Let's build a Decision Tree by using ***all*** the variables of the
+dataset:
+
+```{r}
+data.dt = rpart(output ~ ., data = data2)
+rpart.plot(data.dt, main = "Decision Tree", box.palette = c("#FF6666", "#33CCCC"))
+summary(data.dt)
+```
+
+Inspecting the graph we can confirm that the most significant variables
+out of all are *thall*, *caa*, *cp*, *oldpeak*, *exng* and *age*. At the
+top of the Decision Tree (depth 0 over 4), it is the overall probability
+of having an Heart Attack: it shows that ***54%*** of patients has
+higher chance to face a Cardiac Disease. This node asks whether the
+Maximum Heart Rate is less than 148: if yes, then you go down to the
+root's left child node (depth 2), where ***30%*** of patients has the
+less probability of incurring in an Heart Attack. In the second node,
+you ask if the Number of Major Vessels is above 1, 2 or 3: if yes, then
+the chance of not facing a Cardiac Disease is ***9%***. Keeping on going
+in this way you can understand what features impact the chance of having
+an Heart Attack.
+
+Now let's try implementing the Decision Tree algorithm by using only the
+*numerical* features highlighted in the PCA process:
+
+```{r}
+# only numerical attributes
+num_data.dt = rpart(output ~ age + chol + thalachh + oldpeak + trtbps, data = data2)
+rpart.plot(num_data.dt, main = "Decision Tree", box.palette = c("#FF6666", "#33CCCC"))
+summary(num_data.dt)
+```
+
+Analyzing the graph we can identify that the most significant variables
+out of all are *thalachh*, *oldpeak*, *age*, *trtbps* and *chol*. At the
+top of the Decision Tree (depth 0 over 6), it is the overall probability
+of having an Heart Attack: it shows that ***54%*** of patients has
+higher chance to face a Cardiac Disease. This node asks whether the
+Blood Disorder has a value of 0, 1, or 3: if yes, then you go down to
+the root's left child node (depth 2), where ***26%*** of patients has
+the less probability of incurring in an Heart Attack. In the second
+node, you ask if the Stress Test Depression is greater than 0.7: if yes,
+then the chance of not facing a Cardiac Disease is ***16%***. Keeping on
+going in this way you can understand what features impact the chance of
+having an Heart Attack.
+
+Let's build a Decision Tree using the *meaningful* variables:
+
+```{r}
+# meaningful variables
+cat_data.dt = rpart(output ~ age + chol + thalachh + cp + thall + trtbps, data = data2)
+rpart.plot(cat_data.dt, main = "Decision Tree", box.palette = c("#FF6666", "#33CCCC"))
+summary(cat_data.dt)
+```
+
+At the top of the Decision Tree (depth 0 over 5), it is the overall
+probability of having an Heart Attack: it shows that ***54%*** of
+patients has higher chance to face a Cardiac Disease. This node asks
+whether the Blood Disorder has a value of 0, 1, or 3: if yes, then you
+go down to the root's left child node (depth 2), where ***26%*** of
+patients has the less probability of incurring in an Heart Attack. In
+the second node, you ask if the Chest Pain Type is asymptomatic: if yes,
+then the chance of not facing a Cardiac Disease is ***17%***. Keeping on
+going in this way you can understand what features impact the chance of
+having an Heart Attack.
+
+Last but not least, let's build a Decision Tree by using the *training*
+set:
+
+```{r}
+# Training Set
+data_idx <- sample(nrow(data2), nrow(data2)*0.8)
+data_train <- data2[data_idx,]
+
+head(data_train)
+
+data_train$pred <- NULL
+
+datat.dt = rpart(output ~ ., data = data_train, method = "class")
+rpart.plot(datat.dt, main = "Decision Tree", box.palette = c("#FF6666", "#33CCCC"))
+```
+
+Inspecting the graph we can confirm again that the most significant
+variable out of all are *thall*, *exng*, *caa*, *age* and *chol*. At the
+top of the Decision Tree (depth 0 over 4), it is the overall probability
+of having an Heart Attack: it shows that ***54%*** of patients has
+higher chance to face a Cardiac Disease. This node asks whether the
+Blood Disorder has a value of 0, 1, or 3: if yes, then you go down to
+the root's left child node (depth 2), where ***26%*** of patients has
+the less probability of incurring in an Heart Attack. In the second
+node, you ask the value of the Exercise Induced Angina: if yes, then the
+chance of not facing a Cardiac Disease is ***7%***. Keeping on going in
+this way you can understand what features impact the chance of having an
+Heart Attack.
+
+## 5. Classification Algorithms
+
+In the final part of our analysis we implement three different
+*classification* algorithms identifying to which set of categories an
+observation belongs.
+
+Before implementing the algorithm, we have to create the *train* set and
+*test* set. We decide to split the original dataset 80/20, meaning that
+***80%*** of the data serves to *train* the model, the remaining
+***20%*** to make *predictions* :
+
+```{r}
+data_idx <- sample(nrow(data2), nrow(data2)*0.8)
+# training set
+data_train <- data1[data_idx,]
+# testing set
+data_test <- data1[-data_idx,]
+```
+
+### *5.1. Naive Bayes Classifier*
+
+[Naive Bayes Classifiers]{.underline} are a family of probabilistic
+classifiers based on applying *Bayes* theorem with strong assumptions,
+stating that the occurrence of a certain feature is *independent* of the
+occurrence of other variables.
+
+Let's apply the Naive Bayes Classifier algorithm:
+
+```{r}
+data.nb <- naiveBayes(output ~ ., data = data_train)
+data.nb
+
+data.pred <- predict(data.nb, data_test)
+```
+
+```{r}
+tab_nb <- table(data_test$output, data.pred)
+tab_nb
+# misclassification
+mis_nb <- 1 - sum(diag(tab_nb)) / sum(tab_nb)
+# model accuracy
+acc_nb <- 1 - mis_nb
+```
+
+Inspecting the results, we can notice that about ***82%*** of the data
+has been *correctly* predicted, while the remaining ***18%*** has been
+*erroneously* classified.
+
+### *5.2. K-Nearest Neighbors Classifier*
+
+[K-Nearest Neighbors]{.underline} *(k-NN)* is a classifier which uses
+proximity to make *classifications* and *predictions* about the grouping
+of an individual data point, assuming that *similar* points can be found
+*near* one another.
+
+Let's apply the k-NN algorithm:
+
+```{r}
+# argument in k-NN function
+target <- data2[data_idx, 9]
+# to measure accuracy
+test <- data2[-data_idx, 9]
+
+knn.pred <- knn(data_train[,-c(1:9)], data_test[,-c(1:9)], cl = target, k = 5)
+```
+
+```{r}
+tab_knn <- table(Prediction = knn.pred, Truth = test)
+tab_knn
+# misclassification
+mis_knn <- 1 - sum(diag(tab_knn)) / sum(tab_knn)
+# model accuracy
+acc_knn <- 1 - mis_knn
+```
+
+Inspecting the results, we can notice that about ***70%*** of the data
+has been *correctly* predicted, while the remaining ***30%*** has been
+*erroneously* classified.
+
+### *5.3. Support Vector Machine Classifier*
+
+[Support Vector Machine]{.underline} *(SVM)* is a classification
+algorithm that finds the hyperplane with *maximum* margin in an
+N-dimensional space (where N is the number of features) that distinctly
+*classifies* the data points.
+
+Let's apply the SVM algorithm:
+
+```{r}
+data.lsvm <- svm(output ~ ., data = data_train, kernel = 'linear')
+data.lsvm
+```
+
+```{r}
+tab_svm <- table(Prediction = predict(data.lsvm, data_test), Truth = data_test$output)
+tab_svm
+# misclassification
+mis_svm <- 1 - sum(diag(tab_svm)) / sum(tab_svm)
+# model accuracy
+acc_svm <- 1 - mis_svm
+```
+
+Inspecting the results, we can notice that about ***88%*** of the data
+has been *correctly* predicted, while the remaining ***22%*** has been
+*erroneously* classified.
+
+**Note :** The machine learning models may be *different* each time they
+are trained and, when evaluated, may have a different level of error or
+accuracy. Since every execution of the previous
+[Classification]{.underline} [algorithms]{.underline} is *independent*
+of each other, we decide to report the ***fairest*** *results* achieved!
+
+## 6. Conclusion
+
+Regarding the *Exploratory Data Analysis (**EDA**)*, we can notice that
+the most significant features that impact the chance of having an Heart
+Attack are: [thalachh]{.underline}, [oldpeak]{.underline},
+[cp]{.underline}, [thall]{.underline}, [exng]{.underline} and
+[chol]{.underline}. In particular:
+
+-   inspecting the distribution plot of ***thalachh*** wrt
+    [*output*]{.underline}, we can notice that people with *higher*
+    Maximum Heart Rate achieved have *higher* probability of facing an
+    Heart Attack;
+
+-   analyzing the distribution plot of ***oldpeak*** wrt
+    [*output*]{.underline}, we can observe that people with *lower*
+    Previous Peak achieved have *higher* chances of Cardiac Disease;
+
+-   inspecting the distribution plot of ***cp*** wrt
+    [*output*]{.underline}, we can reveal that people with *Not Anginal*
+    chest pain type have *higher* probability of incurring in an Heart
+    Attack;
+
+-   analyzing the distribution plot of ***thall*** wrt
+    [*output*]{.underline}, we can notice that people with *Normal*
+    Blood Disorder have *higher* chances of Cardiac Disease;
+
+-   inspecting the distribution plot of ***exng*** wrt
+    [*output*]{.underline}, we can observe that people with *NO
+    Exercise* Induced Angina have *higher* probability of facing an
+    Heart Attack;
+
+-   analyzing the distribution plot of ***chol*** wrt
+    [*output*]{.underline}, we can reveal that people with *higher*
+    Cholesterol level have *higher* chances of Cardiac Disease.
+
+It is important to remark that all the above results are the same that
+we have achieved by applying the *Association Rule Mining* technique.
+
+According to the Patterns Identification Algorithms, we can conclude
+that *Prototype Clustering* is the most efficient method for analyzing
+and making prediction on Heart Attack dataset, since *Hierarchical
+Clustering* is not suitable for large datasets.
+
+Regarding the *Classification Algorithms*, in order to determine which
+model is the most accurate for our study, we compute the accuracy for
+each technique:
+
+```{r}
+set.seed(100)
+# create a dataframe for models accuracy 
+model_names <- c("Naive Bayes", "K-NN","SVM")
+# extract accuracy for various models 
+acc <- c(acc_nb, acc_knn, acc_svm)
+df_acc <- data.frame(model_names, acc)
+df_acc$model_names <- factor(df_acc$model_names,levels = df_acc$model_names)
+
+ggplot( mapping = aes(x = df_acc$model_names)) +
+  geom_bar(aes(y = ..acc.., fill = df_acc$model_names), 
+           width = 0.8, show.legend = FALSE) + 
+  geom_text(aes( y = ..acc.., label = scales::percent(..acc..)), 
+            size = 4, stat = "count", vjust = -1)+ ylim(0, 1) +
+  labs(title = "Comparison of Models Accuracy", x = "Classification Algorithms", y = "Accuracy" ) +
+  theme(text = element_text(size = 15)) +
+  theme(plot.title = element_text(hjust = 0.5))  #to center
+```
+
+Inspecting the results, we can notice that [Naive Bayes]{.underline}
+Classifier accuracy is about ***82%***, the [K-Nearest
+Neighbors]{.underline} Classifier accuracy is about ***70%*** and the
+[Support Vector Machine]{.underline} one is about ***88%**.* Thus, we
+can conclude that the *Naive Bayes* algorithm is the ***most**
+appropriate* for the Heart Attack dataset.
